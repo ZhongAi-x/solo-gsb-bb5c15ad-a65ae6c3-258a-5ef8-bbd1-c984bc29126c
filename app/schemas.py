@@ -797,6 +797,72 @@ class BarcodeLookupResponse(BaseModel):
     )
 
 
+# ---------------------------------------------------------------- 对照样品独立来源筛选
+
+class IndependentSourceScreenRequest(BaseModel):
+    """对照样品独立来源筛选:以一个参考样品为对照,从候选样品中筛出
+    取样根互不共享(且与参考样品也不共享)的最大集合。
+
+    - 参考样品与 1~16 个候选样品均须已存在;候选之间不得重复
+    - 沿当前谱系反查各样品全部取样根(合并路径去重),实时重算、不持久化
+    """
+
+    reference_sample_id: str = Field(
+        min_length=1, description="参考(对照)样品号,必须已存在"
+    )
+    candidate_sample_ids: list[Annotated[str, Field(min_length=1)]] = Field(
+        min_length=1,
+        max_length=16,
+        description="1~16 个不重复的候选样品号,均须已存在;顺序即输入顺序(下标从 0 起)",
+    )
+
+    @model_validator(mode="after")
+    def _check_candidates(self) -> "IndependentSourceScreenRequest":
+        ids = self.candidate_sample_ids
+        if len(ids) != len(set(ids)):
+            raise ValueError("candidate_sample_ids 中存在重复样品号")
+        return self
+
+
+class ScreenSharedRootOut(BaseModel):
+    """未入选候选与某个入选样品共享的取样根。"""
+
+    sample_id: str = Field(description="入选样品号")
+    shared_roots: list[str] = Field(description="与该入选样品共享的取样根(升序)")
+
+
+class ScreenCandidateOut(BaseModel):
+    """单个候选样品的筛选结果(入选或未入选及其原因)。"""
+
+    sample_id: str
+    input_index: int = Field(description="在候选输入顺序中的下标(从 0 起)")
+    roots: list[str] = Field(
+        description="沿当前谱系反查到的全部取样根(合并路径去重,升序)"
+    )
+    selected: bool = Field(description="是否入选最终集合")
+    shared_with_reference: list[str] = Field(
+        description="与参考样品共享的取样根(升序);非空即不可选"
+    )
+    shared_with_selected: list[ScreenSharedRootOut] = Field(
+        description="未入选时与各入选样品共享的取样根(按入选样品输入下标升序);"
+                    "入选候选恒为空列表"
+    )
+
+
+class IndependentSourceScreenResponse(BaseModel):
+    reference_sample_id: str
+    reference_roots: list[str] = Field(
+        description="参考样品沿当前谱系反查到的全部取样根(升序)"
+    )
+    selected_count: int = Field(description="入选候选数量(满足条件的最大集合大小)")
+    selected: list[ScreenCandidateOut] = Field(
+        description="入选候选(按输入下标升序):数量最多,同数量取下标列表字典序最小"
+    )
+    excluded: list[ScreenCandidateOut] = Field(
+        description="未入选候选(按输入下标升序),各自列出与参考或入选样品共享的根"
+    )
+
+
 # ---------------------------------------------------------------- 样品冷链测温
 
 class TempProfileRequest(BaseModel):
