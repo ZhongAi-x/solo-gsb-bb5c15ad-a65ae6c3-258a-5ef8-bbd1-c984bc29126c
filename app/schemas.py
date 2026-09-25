@@ -895,3 +895,81 @@ class LocationExcursionResponse(BaseModel):
         description="带保管位置的越界区间,按起止时间升序;"
         "相邻同向越界读数还须位置期间无变更(同位置)才归并"
     )
+
+
+# ---------------------------------------------------------------- 对照样品独立来源筛选
+
+class ControlScreenRequest(BaseModel):
+    """对照样品独立来源筛选:一个参考样品 + 1~16 个不重复候选样品号(均须已存在)。
+
+    服务沿当前谱系反查各样品全部取样根(合并路径去重):与参考样品共享
+    任一根的候选不可选;其余候选两两不得共享根,求数量最多的入选集合,
+    数量并列时按候选输入顺序的下标列表(升序)字典序最小确定唯一结果。
+    """
+
+    reference_sample_id: str = Field(
+        min_length=1, description="参考(对照)样品号,必须已存在"
+    )
+    candidate_sample_ids: list[Annotated[str, Field(min_length=1)]] = Field(
+        min_length=1, max_length=16,
+        description="候选样品号:1~16 个、不得重复、均须已存在",
+    )
+
+    @model_validator(mode="after")
+    def _check_candidates(self) -> "ControlScreenRequest":
+        ids = self.candidate_sample_ids
+        if len(ids) != len(set(ids)):
+            raise ValueError("candidate_sample_ids 中存在重复样品号")
+        return self
+
+
+class ControlScreenSelectedOut(BaseModel):
+    """入选候选样品及其独立来源(全部取样根)。"""
+
+    sample_id: str
+    input_index: int = Field(
+        description="候选在请求 candidate_sample_ids 中的下标(从 0 起)"
+    )
+    roots: list[str] = Field(
+        description="该候选沿当前谱系反查到的全部取样根(合并路径去重,升序)"
+    )
+
+
+class ControlScreenSharedWithSelectedOut(BaseModel):
+    """未入选候选与某个入选样品共享的取样根明细。"""
+
+    sample_id: str = Field(description="入选样品号")
+    input_index: int = Field(description="入选样品的候选下标(从 0 起)")
+    shared_roots: list[str] = Field(description="与该入选样品共享的取样根(升序)")
+
+
+class ControlScreenExcludedOut(BaseModel):
+    """未入选候选及其与参考样品/入选样品共享的根。"""
+
+    sample_id: str
+    input_index: int = Field(
+        description="候选在请求 candidate_sample_ids 中的下标(从 0 起)"
+    )
+    shared_with_reference: list[str] = Field(
+        description="与参考样品共享的取样根(升序;无则为空列表)"
+    )
+    shared_with_selected: list[ControlScreenSharedWithSelectedOut] = Field(
+        description="与入选样品共享根的逐项明细(无则为空列表)"
+    )
+    shared_roots: list[str] = Field(
+        description="与参考样品或入选样品共享的全部取样根(合并去重,升序)"
+    )
+
+
+class ControlScreenResponse(BaseModel):
+    reference_sample_id: str
+    reference_roots: list[str] = Field(
+        description="参考样品沿当前谱系反查到的全部取样根(合并路径去重,升序)"
+    )
+    selected_count: int = Field(description="入选候选数量(来源互不相同的最大集合)")
+    selected: list[ControlScreenSelectedOut] = Field(
+        description="入选候选(按候选下标升序),两两不与参考/彼此共享任一根"
+    )
+    excluded: list[ControlScreenExcludedOut] = Field(
+        description="未入选候选(按候选下标升序),各附与参考/入选样品共享的根"
+    )

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from . import schemas as s
 from . import barcodes as bc
 from . import consumptions as con
+from . import controls as ctl
 from . import recalls as rc
 from . import reservations as rsv
 from . import reversals as rev
@@ -79,9 +80,14 @@ app = FastAPI(
         "  正常读数或超间隔截断,返回起止时间、越界方向与极值,乱序补录可合并或拆分既有区间;\n"
         "  带保管位置的越界区间另按位置交接/冲正审计的 UTC 落库时间重建读数发生时位置\n"
         "  (变更时刻起取新位置、同刻先交接后冲正、同类按明细编号升序),\n"
-        "  期间发生位置变更也截断归并,按段返回位置/起止/方向/极值/读数数"
+        "  期间发生位置变更也截断归并,按段返回位置/起止/方向/极值/读数数\n"
+        "- 对照样品独立来源筛选:输入一个参考样品与 1~16 个不重复候选样品号(均须已存在),\n"
+        "  沿当前谱系反查各样品全部取样根(合并路径去重);与参考样品共享任一根的候选不可选,\n"
+        "  其余候选两两不得共享根,求数量最多的入选集合(同数量按候选输入顺序的下标列表\n"
+        "  字典序最小确定),返回入选样品及各未入选样品与参考/入选样品共享的根;\n"
+        "  不持久化,每次查询按当前谱系实时重算,分装/合并后重新查询即反映最新谱系"
     ),
-    version="1.8.0",
+    version="1.9.0",
     lifespan=lifespan,
 )
 
@@ -903,3 +909,21 @@ def get_temperature_location_excursions(
             },
         )
     return tp.get_location_excursions(conn, sample_id)
+
+
+# ------------------------------------------------------------ 对照样品独立来源筛选
+
+@app.post(
+    "/api/v1/controls/screen",
+    response_model=s.ControlScreenResponse,
+    tags=["对照筛选"],
+    summary="对照样品独立来源筛选:参考样品 + 1~16 个不重复候选,"
+            "沿当前谱系反查全部取样根(合并路径去重),与参考共享任一根的候选不可选,"
+            "其余两两不共享根取数量最多集合(同数量按候选输入下标列表字典序最小),"
+            "未入选样品附与参考/入选样品共享的根;按当前谱系实时重算",
+)
+def screen_control_sources(
+    body: s.ControlScreenRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> s.ControlScreenResponse:
+    return ctl.screen_independent_sources(conn, body)
